@@ -55,8 +55,12 @@ function weekIndexFor(date) {
   return Math.floor(days / 7);
 }
 
-function formatHoursDecimal(seconds) {
-  return (seconds / 3600).toFixed(1).replace(/\.0$/, '');
+function formatHMS(seconds) {
+  const s = Math.max(0, Math.round(seconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
 }
 function formatDuration(seconds) {
   const m = Math.round(seconds / 60);
@@ -264,7 +268,7 @@ function renderDashboard({ weekIndex, weekStart, activities }) {
         stroke-dashoffset="${c * (1 - pct)}"></circle>
     </svg>
     <div class="ring-center">
-      <div class="hours-big">${isDone ? '0' : formatHoursDecimal(remainingSeconds)}</div>
+      <div class="hours-big">${formatHMS(remainingSeconds)}</div>
       <div class="hours-label">${isDone ? 'goal hit' : 'hours left'}</div>
       <div class="hours-sub">${formatDuration(totalSeconds)} / ${WEEKLY_GOAL_HOURS}h</div>
     </div>
