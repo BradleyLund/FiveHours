@@ -167,6 +167,14 @@ main.loading {
   font-variant-numeric: tabular-nums;
 }
 
+.hours-pace {
+  font-size: 11px;
+  color: var(--ink-faint);
+  margin-top: 8px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
 .hero.complete .hours-big { color: var(--done); }
 
 /* Week strip */

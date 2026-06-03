@@ -256,6 +256,16 @@ function renderDashboard({ weekIndex, weekStart, activities }) {
   const pct = Math.min(1, totalSeconds / goalSeconds);
   const isDone = remainingSeconds === 0;
 
+  // Per-day pace: remaining time ÷ days left this week
+  const today = new Date();
+  const dayOfWeek = today.getDay() === 0 ? 7 : today.getDay(); // Mon=1 … Sun=7
+  const hasActivityToday = activities.some(
+    a => parseStravaLocal(a.start_date_local).toDateString() === today.toDateString()
+  );
+  // If today already has an activity, only count future days; otherwise include today
+  const daysLeft = hasActivityToday ? (7 - dayOfWeek) : (8 - dayOfWeek);
+  const perDaySeconds = daysLeft > 0 ? remainingSeconds / daysLeft : 0;
+
   // Ring
   const r = 124;
   const c = 2 * Math.PI * r;
@@ -271,6 +281,7 @@ function renderDashboard({ weekIndex, weekStart, activities }) {
       <div class="hours-big">${formatHMS(remainingSeconds)}</div>
       <div class="hours-label">${isDone ? 'goal hit' : 'hours left'}</div>
       <div class="hours-sub">${formatDuration(totalSeconds)} / ${WEEKLY_GOAL_HOURS}h</div>
+      ${!isDone && daysLeft > 0 ? `<div class="hours-pace">${formatDuration(perDaySeconds)}/day needed</div>` : ''}
     </div>
   `;
 
