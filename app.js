@@ -9,6 +9,12 @@ const AUTH_URL = 'https://www.strava.com/oauth/authorize';
 const API_BASE = 'https://www.strava.com/api/v3';
 
 const CONFIG_KEY = 'fivehours.config';
+const WEIGHT_KEY = 'fivehours.weight';
+const WEIGHT_START = 85;
+const WEIGHT_GOAL = 80;
+const WEEKLY_RUNNING_GOAL_HOURS = 2;
+const RUNNING_GOAL_START_WEEK = 3;
+const RUNNING_TYPES = ['run', 'trailrun', 'virtualrun'];
 const root = document.getElementById('app');
 
 // ───────────────────────── Config / storage ─────────────────────────
@@ -76,6 +82,35 @@ function parseStravaLocal(iso) {
 }
 function dayAbbrev(iso) {
   return ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][parseStravaLocal(iso).getDay()];
+}
+
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function isRunningActivity(a) {
+  const t = (a.sport_type || a.type || '').replace(/\s/g, '').toLowerCase();
+  return RUNNING_TYPES.includes(t);
+}
+
+function getWeightEntries() {
+  try {
+    const data = JSON.parse(localStorage.getItem(WEIGHT_KEY));
+    if (Array.isArray(data) && data.length > 0) return data;
+  } catch {}
+  const initial = [{ date: '2026-06-20', weight: 85 }];
+  localStorage.setItem(WEIGHT_KEY, JSON.stringify(initial));
+  return initial;
+}
+
+function addWeightEntry(date, weight) {
+  const entries = getWeightEntries();
+  const idx = entries.findIndex(e => e.date === date);
+  if (idx >= 0) entries[idx].weight = weight;
+  else entries.push({ date, weight });
+  entries.sort((a, b) => a.date.localeCompare(b.date));
+  localStorage.setItem(WEIGHT_KEY, JSON.stringify(entries));
 }
 
 // ───────────────────────── Strava API ─────────────────────────
@@ -249,6 +284,118 @@ function topbar() {
   ]);
 }
 
+function renderRunningGoal(activities, weekIndex) {
+  if (weekIndex < RUNNING_GOAL_START_WEEK) return null;
+
+  const runSeconds = activities
+    .filter(isRunningActivity)
+    .reduce((s, a) => s + (a.moving_time || 0), 0);
+  const goalSeconds = WEEKLY_RUNNING_GOAL_HOURS * 3600;
+  const pct = Math.min(1, runSeconds / goalSeconds);
+  const isDone = runSeconds >= goalSeconds;
+
+  return el('div', { class: 'run-goal' }, [
+    el('div', { class: 'run-goal-header' }, [
+      el('span', { class: 'run-goal-label' }, 'Running'),
+      el('span', { class: 'run-goal-progress' + (isDone ? ' done' : '') },
+        `${formatDuration(runSeconds)} / ${WEEKLY_RUNNING_GOAL_HOURS}h`),
+    ]),
+    el('div', { class: 'run-bar-track' }, [
+      el('div', { class: 'run-bar-fill' + (isDone ? ' done' : ''),
+        style: `width:${pct * 100}%` }),
+    ]),
+  ]);
+}
+
+function renderWeightTracker(weekIndex) {
+  const entries = getWeightEntries();
+  const bs = blockStart();
+
+  const W = 480, H = 180;
+  const ml = 38, mr = 12, mt = 12, mb = 24;
+  const pw = W - ml - mr, ph = H - mt - mb;
+
+  const dateToWeek = (dateStr) => {
+    const d = new Date(dateStr + 'T12:00:00');
+    return (d - bs) / (7 * 86400000);
+  };
+
+  const xMin = RUNNING_GOAL_START_WEEK;
+  const xMax = BLOCK_WEEKS;
+  const xRange = xMax - xMin;
+  const xPos = (wf) => ml + ((wf - xMin) / xRange) * pw;
+
+  const allWeights = entries.map(e => e.weight).concat([WEIGHT_START, WEIGHT_GOAL]);
+  const yMinVal = Math.floor(Math.min(...allWeights)) - 1;
+  const yMaxVal = Math.ceil(Math.max(...allWeights)) + 1;
+  const yRange = yMaxVal - yMinVal;
+  const yPos = (w) => mt + (1 - (w - yMinVal) / yRange) * ph;
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" class="weight-chart">`;
+
+  for (let kg = yMinVal; kg <= yMaxVal; kg++) {
+    const yy = yPos(kg);
+    svg += `<line x1="${ml}" y1="${yy}" x2="${W - mr}" y2="${yy}" stroke="var(--rule)" stroke-width="0.5"/>`;
+    svg += `<text x="${ml - 6}" y="${yy + 3.5}" text-anchor="end" fill="var(--ink-faint)" font-size="10" font-family="inherit">${kg}</text>`;
+  }
+
+  for (let w = xMin; w < xMax; w++) {
+    svg += `<text x="${xPos(w)}" y="${H - 4}" text-anchor="middle" fill="var(--ink-faint)" font-size="10" font-family="inherit">W${w + 1}</text>`;
+  }
+
+  svg += `<line x1="${xPos(xMin)}" y1="${yPos(WEIGHT_START)}" x2="${xPos(xMax)}" y2="${yPos(WEIGHT_GOAL)}" stroke="var(--done)" stroke-width="1.5" stroke-dasharray="6 4" opacity="0.6"/>`;
+
+  const sorted = [...entries].sort((a, b) => a.date.localeCompare(b.date));
+  if (sorted.length > 1) {
+    const pts = sorted.map(e => `${xPos(dateToWeek(e.date))},${yPos(e.weight)}`).join(' ');
+    svg += `<polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
+  }
+
+  for (const e of sorted) {
+    svg += `<circle cx="${xPos(dateToWeek(e.date))}" cy="${yPos(e.weight)}" r="4" fill="var(--accent)" stroke="var(--surface)" stroke-width="2"/>`;
+  }
+
+  svg += '</svg>';
+
+  const chartEl = el('div', { class: 'weight-chart-wrap' });
+  chartEl.innerHTML = svg;
+
+  const latest = sorted[sorted.length - 1];
+  const latestW = latest ? latest.weight : WEIGHT_START;
+
+  const section = el('section', { class: 'weight-section' }, [
+    el('div', { class: 'section-title' }, [
+      document.createTextNode('Weight'),
+      el('span', { class: 'meta' }, `${latestW.toFixed(1)}kg → ${WEIGHT_GOAL}kg · ${(latestW - WEIGHT_GOAL).toFixed(1)}kg to go`),
+    ]),
+    chartEl,
+  ]);
+
+  const form = el('form', { class: 'weight-form' }, [
+    el('input', {
+      type: 'number',
+      id: 'weightInput',
+      step: '0.1',
+      placeholder: 'kg',
+      required: 'required',
+    }),
+    el('button', { type: 'submit', class: 'btn btn-ghost' }, 'Log today'),
+  ]);
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const input = document.getElementById('weightInput');
+    const w = parseFloat(input.value);
+    if (isNaN(w) || w < 30 || w > 300) return;
+    addWeightEntry(todayISO(), w);
+    const old = document.querySelector('.weight-section');
+    if (old) old.replaceWith(renderWeightTracker(weekIndex));
+  });
+
+  section.appendChild(form);
+  return section;
+}
+
 function renderDashboard({ weekIndex, weekStart, activities }) {
   const totalSeconds = activities.reduce((s, a) => s + (a.moving_time || 0), 0);
   const goalSeconds = WEEKLY_GOAL_HOURS * 3600;
@@ -340,7 +487,10 @@ function renderDashboard({ weekIndex, weekStart, activities }) {
     el('button', { class: 'btn btn-ghost', onclick: () => load(true) }, '↻ Refresh'),
   ]);
 
-  render([topbar(), hero, weeks, section, actions]);
+  const runGoal = renderRunningGoal(activities, weekIndex);
+  const weightTracker = renderWeightTracker(weekIndex);
+
+  render([topbar(), hero, runGoal, weeks, section, actions, weightTracker]);
 }
 
 function renderError(msg) {

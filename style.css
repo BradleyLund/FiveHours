@@ -422,6 +422,96 @@ main.loading {
   line-height: 1.5;
 }
 
+/* Running sub-goal */
+.run-goal {
+  margin-bottom: 32px;
+  padding: 0 4px;
+}
+
+.run-goal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+
+.run-goal-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.run-goal-progress {
+  font-size: 12px;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.run-goal-progress.done {
+  color: var(--done);
+  font-weight: 600;
+}
+
+.run-bar-track {
+  height: 6px;
+  background: var(--rule);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.run-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  min-width: 0;
+}
+
+.run-bar-fill.done {
+  background: var(--done);
+}
+
+/* Weight tracker */
+.weight-section {
+  margin-top: 32px;
+}
+
+.weight-chart-wrap {
+  margin-bottom: 16px;
+}
+
+.weight-chart {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.weight-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.weight-form input {
+  width: 100px;
+  padding: 10px 14px;
+  font-size: 14px;
+  font-family: inherit;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.weight-form input:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: white;
+}
+
 /* State: pre-block / post-block */
 .state-msg {
   text-align: center;
