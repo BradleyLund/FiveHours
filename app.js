@@ -92,6 +92,11 @@ function todayISO() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+// Moving time, falling back to elapsed time (manual entries may only have that).
+function activitySeconds(a) {
+  return a.moving_time || a.elapsed_time || 0;
+}
+
 function isRunningActivity(a) {
   const t = (a.sport_type || a.type || '').replace(/\s/g, '').toLowerCase();
   return RUNNING_TYPES.includes(t);
@@ -246,7 +251,7 @@ function renderRunningGoal(activities, weekIndex) {
 
   const runSeconds = activities
     .filter(isRunningActivity)
-    .reduce((s, a) => s + (a.moving_time || 0), 0);
+    .reduce((s, a) => s + activitySeconds(a), 0);
   const goalSeconds = WEEKLY_RUNNING_GOAL_HOURS * 3600;
   const pct = Math.min(1, runSeconds / goalSeconds);
   const isDone = runSeconds >= goalSeconds;
@@ -360,7 +365,7 @@ function renderWeightTracker(weekIndex) {
 }
 
 function renderDashboard({ weekIndex, weekStart, activities }) {
-  const totalSeconds = activities.reduce((s, a) => s + (a.moving_time || 0), 0);
+  const totalSeconds = activities.reduce((s, a) => s + activitySeconds(a), 0);
   const goalSeconds = WEEKLY_GOAL_HOURS * 3600;
   const remainingSeconds = Math.max(0, goalSeconds - totalSeconds);
   const pct = Math.min(1, totalSeconds / goalSeconds);
@@ -433,7 +438,7 @@ function renderDashboard({ weekIndex, weekStart, activities }) {
           document.createTextNode(a.name || '(untitled)'),
           el('span', { class: 'sport' }, (a.sport_type || a.type || '').replace(/([A-Z])/g, ' $1').trim().toLowerCase()),
         ]),
-        el('span', { class: 'dur' }, formatDuration(a.moving_time || 0)),
+        el('span', { class: 'dur' }, formatDuration(activitySeconds(a))),
       ]));
     }
   }
