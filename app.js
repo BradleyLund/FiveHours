@@ -1,7 +1,11 @@
-// Five Hours — 5h/week × 12 weeks training tracker, Strava-backed.
+// Five Hours — 5h/week training tracker, Strava-backed.
 
-const BLOCK_START_ISO = '2026-05-25'; // Mon
-const BLOCK_WEEKS = 12;
+// Block 2: Mon 16 Nov 2026 → Sun 20 Dec 2026, the Sunday before NAOC
+// (North American Orienteering Championships, Arizona, starts Sun 27 Dec 2026).
+const BLOCK_START_ISO = '2026-11-16'; // Mon
+const BLOCK_WEEKS = 5;
+const TARGET_EVENT = 'NAOC';
+const TARGET_EVENT_ISO = '2026-12-27';
 const WEEKLY_GOAL_HOURS = 5;
 
 const TOKEN_URL = 'https://www.strava.com/oauth/token';
@@ -13,7 +17,7 @@ const WEIGHT_KEY = 'fivehours.weight';
 const WEIGHT_START = 85;
 const WEIGHT_GOAL = 80;
 const WEEKLY_RUNNING_GOAL_HOURS = 2;
-const RUNNING_GOAL_START_WEEK = 3;
+const RUNNING_GOAL_START_WEEK = 0;
 const RUNNING_TYPES = ['run', 'trailrun', 'virtualrun'];
 const root = document.getElementById('app');
 
@@ -202,7 +206,7 @@ function renderSetup(errorMsg) {
   const setup = el('section', { class: 'setup' }, [
     el('div', { class: 'brand' }, [el('span', { class: 'dot' }), 'Five Hours']),
     el('h1', {}, 'Connect Strava'),
-    el('p', {}, '5h/week × 12 weeks of training. Pulls activities from your Strava account.'),
+    el('p', {}, `5h/week × ${BLOCK_WEEKS} weeks of training. Pulls activities from your Strava account.`),
     el('ol', { html: `
       <li>Visit <code>https://www.strava.com/settings/api</code> and create an app (any name).</li>
       <li>Set <strong>Authorization Callback Domain</strong> to <code>${window.location.hostname || 'localhost'}</code></li>
@@ -259,11 +263,13 @@ function renderPreBlock() {
 }
 
 function renderPostBlock() {
+  const [y, m, d] = TARGET_EVENT_ISO.split('-').map(Number);
+  const eventFmt = new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
   render([
     topbar(),
     el('div', { class: 'state-msg' }, [
-      el('h2', {}, '12 weeks complete'),
-      el('p', {}, 'Block finished. Nice work.'),
+      el('h2', {}, `${BLOCK_WEEKS} weeks complete`),
+      el('p', {}, `Block finished. Nice work — ${TARGET_EVENT} starts ${eventFmt}.`),
     ]),
   ]);
 }
@@ -308,8 +314,14 @@ function renderRunningGoal(activities, weekIndex) {
 }
 
 function renderWeightTracker(weekIndex) {
-  const entries = getWeightEntries();
+  const allEntries = getWeightEntries();
   const bs = blockStart();
+  const bsISO = BLOCK_START_ISO;
+  const beISO = (() => { const e = blockEnd(); return `${e.getFullYear()}-${String(e.getMonth() + 1).padStart(2, '0')}-${String(e.getDate()).padStart(2, '0')}`; })();
+  // Carry the last weight from before this block forward as the starting point.
+  const prior = allEntries.filter(e => e.date < bsISO);
+  const startWeight = prior.length ? prior[prior.length - 1].weight : WEIGHT_START;
+  const entries = allEntries.filter(e => e.date >= bsISO && e.date < beISO);
 
   const W = 480, H = 180;
   const ml = 38, mr = 12, mt = 12, mb = 24;
@@ -320,12 +332,12 @@ function renderWeightTracker(weekIndex) {
     return (d - bs) / (7 * 86400000);
   };
 
-  const xMin = RUNNING_GOAL_START_WEEK;
+  const xMin = 0;
   const xMax = BLOCK_WEEKS;
   const xRange = xMax - xMin;
   const xPos = (wf) => ml + ((wf - xMin) / xRange) * pw;
 
-  const allWeights = entries.map(e => e.weight).concat([WEIGHT_START, WEIGHT_GOAL]);
+  const allWeights = entries.map(e => e.weight).concat([startWeight, WEIGHT_GOAL]);
   const yMinVal = Math.floor(Math.min(...allWeights)) - 1;
   const yMaxVal = Math.ceil(Math.max(...allWeights)) + 1;
   const yRange = yMaxVal - yMinVal;
@@ -343,7 +355,7 @@ function renderWeightTracker(weekIndex) {
     svg += `<text x="${xPos(w)}" y="${H - 4}" text-anchor="middle" fill="var(--ink-faint)" font-size="10" font-family="inherit">W${w + 1}</text>`;
   }
 
-  svg += `<line x1="${xPos(xMin)}" y1="${yPos(WEIGHT_START)}" x2="${xPos(xMax)}" y2="${yPos(WEIGHT_GOAL)}" stroke="var(--done)" stroke-width="1.5" stroke-dasharray="6 4" opacity="0.6"/>`;
+  svg += `<line x1="${xPos(xMin)}" y1="${yPos(startWeight)}" x2="${xPos(xMax)}" y2="${yPos(WEIGHT_GOAL)}" stroke="var(--done)" stroke-width="1.5" stroke-dasharray="6 4" opacity="0.6"/>`;
 
   const sorted = [...entries].sort((a, b) => a.date.localeCompare(b.date));
   if (sorted.length > 1) {
@@ -361,7 +373,7 @@ function renderWeightTracker(weekIndex) {
   chartEl.innerHTML = svg;
 
   const latest = sorted[sorted.length - 1];
-  const latestW = latest ? latest.weight : WEIGHT_START;
+  const latestW = latest ? latest.weight : startWeight;
 
   const section = el('section', { class: 'weight-section' }, [
     el('div', { class: 'section-title' }, [
