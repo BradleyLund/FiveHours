@@ -1,4 +1,5 @@
-// Five Hours — 5h/week training tracker, Strava-backed.
+// Five Hours — 5h/week training tracker. Activities come from Garmin Connect
+// via intervals.icu (free, syncs from Garmin), read with a personal API key.
 
 // Block 2: Mon 16 Nov 2026 → Sun 20 Dec 2026, the Sunday before NAOC
 // (North American Orienteering Championships, Arizona, starts Sun 27 Dec 2026).
@@ -8,9 +9,7 @@ const TARGET_EVENT = 'NAOC';
 const TARGET_EVENT_ISO = '2026-12-27';
 const WEEKLY_GOAL_HOURS = 5;
 
-const TOKEN_URL = 'https://www.strava.com/oauth/token';
-const AUTH_URL = 'https://www.strava.com/oauth/authorize';
-const API_BASE = 'https://www.strava.com/api/v3';
+const API_BASE = 'https://intervals.icu/api/v1';
 
 const CONFIG_KEY = 'fivehours.config';
 const WEIGHT_KEY = 'fivehours.weight';
@@ -79,13 +78,13 @@ function formatDuration(seconds) {
   if (h === 0) return `${mm}m`;
   return `${h}h ${String(mm).padStart(2, '0')}m`;
 }
-function parseStravaLocal(iso) {
-  // Strava's start_date_local has a trailing Z but represents local time at the
-  // activity's location. Strip the Z so JS parses it as local.
+function parseLocalTime(iso) {
+  // start_date_local is the wall-clock time where the activity happened. Drop
+  // any trailing Z so JS parses it as local rather than UTC.
   return new Date(String(iso).replace(/Z$/, ''));
 }
 function dayAbbrev(iso) {
-  return ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][parseStravaLocal(iso).getDay()];
+  return ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][parseLocalTime(iso).getDay()];
 }
 
 function todayISO() {
@@ -117,57 +116,26 @@ function addWeightEntry(date, weight) {
   localStorage.setItem(WEIGHT_KEY, JSON.stringify(entries));
 }
 
-// ───────────────────────── Strava API ─────────────────────────
+// ───────────────────────── intervals.icu API ─────────────────────────
 
-async function exchangeCode(clientId, clientSecret, code) {
-  const res = await fetch(TOKEN_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      client_id: clientId,
-      client_secret: clientSecret,
-      code,
-      grant_type: 'authorization_code',
-    }),
-  });
-  if (!res.ok) throw new Error(`Token exchange failed (${res.status}): ${await res.text()}`);
-  return res.json();
+function isoDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-async function refreshAccessToken(cfg) {
-  const res = await fetch(TOKEN_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      client_id: cfg.clientId,
-      client_secret: cfg.clientSecret,
-      refresh_token: cfg.refreshToken,
-      grant_type: 'refresh_token',
-    }),
+async function fetchActivities(apiKey, oldestDate, newestDate) {
+  // Athlete id 0 means "the athlete this API key belongs to". Both dates are
+  // inclusive local calendar days.
+  const url = `${API_BASE}/athlete/0/activities?oldest=${isoDate(oldestDate)}&newest=${isoDate(newestDate)}`;
+  const res = await fetch(url, {
+    headers: { Authorization: 'Basic ' + btoa('API_KEY:' + apiKey) },
   });
-  if (!res.ok) throw new Error(`Refresh failed (${res.status}): ${await res.text()}`);
-  return res.json();
-}
-
-async function ensureFreshToken(cfg) {
-  const now = Math.floor(Date.now() / 1000);
-  if (cfg.accessToken && cfg.expiresAt && cfg.expiresAt - 120 > now) {
-    return cfg.accessToken;
+  if (res.status === 401 || res.status === 403) {
+    throw new Error('intervals.icu rejected the API key. Check it in intervals.icu → Settings → Developer Settings, then tap Reset and enter it again.');
   }
-  const data = await refreshAccessToken(cfg);
-  cfg.accessToken = data.access_token;
-  cfg.refreshToken = data.refresh_token;
-  cfg.expiresAt = data.expires_at;
-  setConfig(cfg);
-  return cfg.accessToken;
-}
-
-async function fetchActivities(token, afterEpoch, beforeEpoch) {
-  // Strava paginates; for a single week we won't exceed 200.
-  const url = `${API_BASE}/athlete/activities?after=${afterEpoch}&before=${beforeEpoch}&per_page=200`;
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   if (!res.ok) throw new Error(`Activities fetch failed (${res.status}): ${await res.text()}`);
-  return res.json();
+  const list = await res.json();
+  // Activities imported from Strava come through as empty stubs; skip them.
+  return list.filter(a => a && a.start_date_local && a.source !== 'STRAVA');
 }
 
 // ───────────────────────── Rendering ─────────────────────────
@@ -201,53 +169,36 @@ function renderLoading() {
 }
 
 function renderSetup(errorMsg) {
-  const redirectUri = window.location.origin + window.location.pathname;
-
   const setup = el('section', { class: 'setup' }, [
     el('div', { class: 'brand' }, [el('span', { class: 'dot' }), 'Five Hours']),
-    el('h1', {}, 'Connect Strava'),
-    el('p', {}, `5h/week × ${BLOCK_WEEKS} weeks of training. Pulls activities from your Strava account.`),
+    el('h1', {}, 'Connect Garmin'),
+    el('p', {}, `5h/week × ${BLOCK_WEEKS} weeks of training. Reads your Garmin Connect activities through intervals.icu (free).`),
     el('ol', { html: `
-      <li>Visit <code>https://www.strava.com/settings/api</code> and create an app (any name).</li>
-      <li>Set <strong>Authorization Callback Domain</strong> to <code>${window.location.hostname || 'localhost'}</code></li>
-      <li>Copy your <strong>Client ID</strong> and <strong>Client Secret</strong> below.</li>
+      <li>Sign up at <code>intervals.icu</code> and connect your Garmin account when it asks (Settings → Connections → Garmin Connect).</li>
+      <li>In intervals.icu, open <strong>Settings → Developer Settings</strong> and generate an <strong>API key</strong>.</li>
+      <li>Paste the key below.</li>
     `}),
     errorMsg ? el('div', { class: 'error' }, errorMsg) : null,
     el('form', { id: 'setupForm' }, [
-      el('label', { for: 'clientId' }, 'Client ID'),
-      el('input', { type: 'text', id: 'clientId', required: 'required', autocomplete: 'off' }),
-      el('label', { for: 'clientSecret' }, 'Client Secret'),
-      el('input', { type: 'password', id: 'clientSecret', required: 'required', autocomplete: 'off' }),
-      el('button', { type: 'submit', class: 'btn btn-accent' }, 'Connect with Strava →'),
+      el('label', { for: 'apiKey' }, 'intervals.icu API key'),
+      el('input', { type: 'password', id: 'apiKey', required: 'required', autocomplete: 'off' }),
+      el('button', { type: 'submit', class: 'btn btn-accent' }, 'Connect →'),
     ]),
-    el('div', { class: 'note' }, `Tokens are stored only in your browser (localStorage). Redirect URI: ${redirectUri}`),
+    el('div', { class: 'note' }, 'Your key is stored only in this browser (localStorage).'),
   ]);
 
   render(setup);
 
   const existing = getConfig();
-  if (existing.clientId) document.getElementById('clientId').value = existing.clientId;
-  if (existing.clientSecret) document.getElementById('clientSecret').value = existing.clientSecret;
+  if (existing.apiKey) document.getElementById('apiKey').value = existing.apiKey;
 
   document.getElementById('setupForm').addEventListener('submit', (e) => {
     e.preventDefault();
-    const clientId = document.getElementById('clientId').value.trim();
-    const clientSecret = document.getElementById('clientSecret').value.trim();
-    if (!clientId || !clientSecret) return;
-    setConfig({ ...getConfig(), clientId, clientSecret });
-    startOAuth(clientId);
+    const apiKey = document.getElementById('apiKey').value.trim();
+    if (!apiKey) return;
+    setConfig({ apiKey });
+    load(true);
   });
-}
-
-function startOAuth(clientId) {
-  const redirectUri = window.location.origin + window.location.pathname;
-  const url = new URL(AUTH_URL);
-  url.searchParams.set('client_id', clientId);
-  url.searchParams.set('response_type', 'code');
-  url.searchParams.set('redirect_uri', redirectUri);
-  url.searchParams.set('approval_prompt', 'auto');
-  url.searchParams.set('scope', 'activity:read_all');
-  window.location.assign(url.toString());
 }
 
 function renderPreBlock() {
@@ -281,7 +232,7 @@ function topbar() {
       class: 'menu-btn',
       title: 'Disconnect & reset',
       onclick: () => {
-        if (confirm('Disconnect Strava and reset all settings?')) {
+        if (confirm('Disconnect intervals.icu and reset settings? Your weight log is kept.')) {
           clearConfig();
           window.location.assign(window.location.pathname);
         }
@@ -419,7 +370,7 @@ function renderDashboard({ weekIndex, weekStart, activities }) {
   const today = new Date();
   const dayOfWeek = today.getDay() === 0 ? 7 : today.getDay(); // Mon=1 … Sun=7
   const hasActivityToday = activities.some(
-    a => parseStravaLocal(a.start_date_local).toDateString() === today.toDateString()
+    a => parseLocalTime(a.start_date_local).toDateString() === today.toDateString()
   );
   // If today already has an activity, only count future days; otherwise include today
   const daysLeft = hasActivityToday ? (7 - dayOfWeek) : (8 - dayOfWeek);
@@ -466,7 +417,7 @@ function renderDashboard({ weekIndex, weekStart, activities }) {
 
   // Activities
   const activitiesSorted = [...activities].sort(
-    (a, b) => parseStravaLocal(b.start_date_local) - parseStravaLocal(a.start_date_local)
+    (a, b) => parseLocalTime(b.start_date_local) - parseLocalTime(a.start_date_local)
   );
 
   const activitiesList = el('ul', { class: 'activities' }, []);
@@ -520,43 +471,9 @@ function renderError(msg) {
 
 // ───────────────────────── Main flow ─────────────────────────
 
-async function handleOAuthRedirect() {
-  const params = new URLSearchParams(window.location.search);
-  const code = params.get('code');
-  const error = params.get('error');
-  if (error) {
-    history.replaceState({}, '', window.location.pathname);
-    renderSetup(`Strava authorization was cancelled or failed: ${error}`);
-    return true;
-  }
-  if (!code) return false;
-
-  const cfg = getConfig();
-  if (!cfg.clientId || !cfg.clientSecret) {
-    history.replaceState({}, '', window.location.pathname);
-    renderSetup('Missing client credentials. Please re-enter.');
-    return true;
-  }
-
-  renderLoading();
-  try {
-    const data = await exchangeCode(cfg.clientId, cfg.clientSecret, code);
-    cfg.accessToken = data.access_token;
-    cfg.refreshToken = data.refresh_token;
-    cfg.expiresAt = data.expires_at;
-    setConfig(cfg);
-    history.replaceState({}, '', window.location.pathname);
-    return false; // fall through to dashboard
-  } catch (err) {
-    history.replaceState({}, '', window.location.pathname);
-    renderSetup(err.message);
-    return true;
-  }
-}
-
 async function load(force = false) {
   const cfg = getConfig();
-  if (!cfg.clientId || !cfg.clientSecret || !cfg.refreshToken) {
+  if (!cfg.apiKey) {
     renderSetup();
     return;
   }
@@ -569,12 +486,9 @@ async function load(force = false) {
   if (force) renderLoading();
 
   try {
-    const token = await ensureFreshToken(cfg);
     const ws = weekStartFor(now);
-    const we = new Date(ws); we.setDate(we.getDate() + 7);
-    const after = Math.floor(ws.getTime() / 1000);
-    const before = Math.floor(we.getTime() / 1000);
-    const activities = await fetchActivities(token, after, before);
+    const we = new Date(ws); we.setDate(we.getDate() + 6); // Sunday, inclusive
+    const activities = await fetchActivities(cfg.apiKey, ws, we);
     renderDashboard({ weekIndex: wi, weekStart: ws, activities });
   } catch (err) {
     renderError(err.message);
@@ -583,8 +497,9 @@ async function load(force = false) {
 
 async function main() {
   renderLoading();
-  const handled = await handleOAuthRedirect();
-  if (!handled) await load();
+  // Clean up any leftover ?code= from the old Strava sign-in flow.
+  if (window.location.search) history.replaceState({}, '', window.location.pathname);
+  await load();
 }
 
 main();
